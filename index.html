@@ -55,6 +55,7 @@
     const STATE_TUTORIAL = "STATE_TUTORIAL";
     const STATE_GAME_2D = "STATE_GAME_2D";
     const STATE_GAME_3D_BYPASS = "STATE_GAME_3D_BYPASS";
+    const STATE_BOSS_DISCOVERY = "STATE_BOSS_DISCOVERY";
     const STATE_BOSS_P1 = "STATE_BOSS_P1";
     const STATE_BOSS_P2 = "STATE_BOSS_P2";
     const STATE_BOSS_P3 = "STATE_BOSS_P3";
@@ -95,9 +96,13 @@
     let parryFailT = 0;
     let screenShake = { t: 0, max: 0, power: 0 };
     let pauseMenu = { active: false };
+    let devInvincible = false;
+    let devCheatUnlocked = false;
+    let devCheatInput = "";
     let audioCtx = null;
     let bgmNodes = null;
     const screenFx = [];
+    const chargedSlashFx = [];
 
     const camera2D = { x: 0, y: 0, zoom: 0.4, targetZoom: 0.4 };
     const camera3D = { yaw: 0, pitch: -0.08, fov: 75, fovTarget: 75 };
@@ -107,7 +112,8 @@
       z: 0, px: 0, py: 1.4, pz: 0, vx3: 0, vz3: 0,
       maxHp: 10, hp: 10, onGround: false, wall: 0, facing: 1,
       sliding: 0, invuln: 0, dashCd: 0, dashT: 0, parryCd: 0,
-      parryT: 0, parryFxT: 0, parryPending: false, slashT: 0, slashCd: 0, hook: null, corruption: 0
+      parryT: 0, parryFxT: 0, parryPending: false, slashT: 0, slashCd: 0, hook: null, corruption: 0,
+      bossPrototype: false, parryChargeCount: 0, swordEnergy: 0, chargedSlashHold: 0, chargedSlashFired: false
     };
     player.aimAngle = 0;
 
@@ -153,7 +159,7 @@
         tutorialDash: "F : dash in 3D rooms",
         tutorialParry: "RMB : parry projectiles / release hook",
         trapLegendTitle: "TRAP DATA",
-        trapLaser: "DEAD SECTOR: white blinking laser. Touching it during ON state is lethal.",
+        trapLaser: "DEAD SECTOR: white blinking laser. Touching it during ON state deals heavy damage.",
         trapWaterfall: "GLITCH FALL: black noise curtain. Passing through briefly covers your vision.",
         trapGravity: "INVERSION PAD: flips gravity. Your controls stay the same, but the ceiling becomes the floor.",
         tutorialEnemyContact: "Enemies chase, hit, leap back, then re-engage",
@@ -220,7 +226,7 @@
         tutorialParry: "RMB : \ud328\ub9c1 / \uac08\uace0\ub9ac \ud574\uc81c",
         translationWarning: "\ubc88\uc5ed\uc774 \ubd88\uc548\uc815\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4. \uc601\uc5b4 \ubaa8\ub4dc\ub97c \uad8c\uc7a5\ud569\ub2c8\ub2e4.",
         trapLegendTitle: "\ud568\uc815 \ub370\uc774\ud130",
-        trapLaser: "DEAD SECTOR: \ud558\uc580\uc0c9\uc73c\ub85c \uae5c\ube61\uc774\ub294 \ub808\uc774\uc800\uc785\ub2c8\ub2e4. \ucf1c\uc838 \uc788\uc744 \ub54c \ub2ff\uc73c\uba74 \uc989\uc0ac\ud569\ub2c8\ub2e4.",
+        trapLaser: "DEAD SECTOR: \ud558\uc580\uc0c9\uc73c\ub85c \uae5c\ube61\uc774\ub294 \ub808\uc774\uc800\uc785\ub2c8\ub2e4. \ucf1c\uc838 \uc788\uc744 \ub54c \ub2ff\uc73c\uba74 \uac15\ub825\ud55c \ud53c\ud574\ub97c \ubc1b\uc2b5\ub2c8\ub2e4.",
         trapWaterfall: "\uae00\ub9ac\uce58 \ud3ed\ud3ec: \uac80\uc740 \ub178\uc774\uc988 \ucee4\ud2bc\uc785\ub2c8\ub2e4. \uc9c0\ub098\uac00\uba74 \uc7a0\uc2dc \uc2dc\uc57c\uac00 \uac00\ub824\uc9d1\ub2c8\ub2e4.",
         trapGravity: "\uc911\ub825 \ubc18\uc804 \ud328\ub4dc: \uc911\ub825\uc774 \ub4a4\uc9d1\ud799\ub2c8\ub2e4. \uc870\uc791\uc740 \uac19\uc9c0\ub9cc \ucc9c\uc7a5\uc774 \ubc14\ub2e5\uc774 \ub429\ub2c8\ub2e4.",
         tutorialEnemyContact: "\uc801\uc740 \ubd80\ub52a\ud78c \ub4a4 \ub4a4\ub85c \ud280\uc5c8\ub2e4\uac00 \ub2e4\uc2dc \ucd94\uc801\ud569\ub2c8\ub2e4",
@@ -314,6 +320,7 @@
     ];
     const trainingPortal = { x: 8200, y: 660, w: 86, h: 520, completed: false };
     const tutorialExitPortal = { x: 9700, y: 620, w: 92, h: 600 };
+    const devBossRift = { x: tutorialExitPortal.x, y: tutorialExitPortal.y, w: tutorialExitPortal.w, h: tutorialExitPortal.h, hold: 0, open: false };
     const tutorialTrapSamples = {
       laser: { x: 4540, y: 1080, w: 360, h: 32, phase: 0.15 },
       waterfall: { x: 6420, y: 320, w: 90, h: 880 },
@@ -369,7 +376,7 @@
     rebuildMainMapLayout();
     tidyTrapPlacement();
 
-    let chasingWall = { x: -420, speed: 220, fringe: 0 };
+    let chasingWall = { x: -420, speed: 300, fringe: 0 };
     let room = null;
     let boss = null;
     let bossMaze = null;
@@ -449,6 +456,7 @@
     addEventListener("keydown", e => {
       if (state === STATE_EXITED) return;
       ensureAudio();
+      handleDevCheatKey(e);
       if (tutorialPause) {
         e.preventDefault();
         keys.clear();
@@ -545,6 +553,7 @@
         STATE_TUTORIAL,
         STATE_GAME_2D,
         STATE_GAME_3D_BYPASS,
+        STATE_BOSS_DISCOVERY,
         STATE_BOSS_P1,
         STATE_BOSS_P2,
         STATE_BOSS_P3
@@ -606,6 +615,24 @@
       if (hintEl) hintEl.style.opacity = "0";
       try { window.close(); } catch (_) {}
     }
+
+    function handleDevCheatKey(e) {
+      const initialWindow = state === STATE_TUTORIAL && gameTime <= 5;
+      if ((!devCheatUnlocked && !initialWindow) || !/^[a-z]$/i.test(e.key || "")) return;
+      const code = "tqlimiter";
+      const ch = e.key.toLowerCase();
+      const next = devCheatInput + ch;
+      devCheatInput = code.startsWith(next) ? next : (code.startsWith(ch) ? ch : "");
+      if (devCheatInput === code) {
+        devCheatUnlocked = true;
+        devInvincible = !devInvincible;
+        devCheatInput = "";
+        beep(devInvincible ? 880 : 220, 0.16, "triangle", 0.07, devInvincible ? 1.8 : 0.6);
+        burst(W / 2, H * 0.35, devInvincible ? "#66ffff" : "#ff3030", 32, 380);
+        addShake(7, 0.14);
+      }
+    }
+
 
     function pauseButtons() {
       const w = Math.min(320, W - 70);
@@ -793,22 +820,27 @@
       state = STATE_TUTORIAL;
       startTime = performance.now();
       gameTime = 0;
+      devInvincible = false;
+      devCheatInput = "";
       Object.assign(player, {
         x: 120, y: 1280, vx: 0, vy: 0, z: 0, px: 0, py: 1.4, pz: 0, vx3: 0, vz3: 0,
-        hp: 10, onGround: false, wall: 0, facing: 1, sliding: 0, invuln: 0,
-        dashCd: 0, dashT: 0, parryCd: 0, parryT: 0, parryFxT: 0, parryPending: false, slashT: 0, slashCd: 0, hook: null, corruption: 0
+        maxHp: 10, hp: 10, onGround: false, wall: 0, facing: 1, sliding: 0, invuln: 0,
+        dashCd: 0, dashT: 0, parryCd: 0, parryT: 0, parryFxT: 0, parryPending: false, slashT: 0, slashCd: 0, hook: null, corruption: 0,
+        bossPrototype: false, parryChargeCount: 0, swordEnergy: 0, chargedSlashHold: 0, chargedSlashFired: false
       });
       tutorialPause = null;
       tutorialEnemyStage = 0;
       tutorialEnemies.length = 0;
       gates.forEach(g => { g.locked = true; g.cleared = false; });
       trainingPortal.completed = false;
+      devBossRift.hold = 0;
+      devBossRift.open = false;
       reset2DEnemies();
       skyLasers.length = 0;
       sideLasers.length = 0;
       inversionPads.forEach(p => p.used = false);
       world.gravity = 4500;
-      chasingWall = { x: -420, speed: 220, fringe: 0 };
+      chasingWall = { x: -420, speed: 300, fringe: 0 };
       camera2D.x = player.x;
       camera2D.y = player.y - 100;
       camera2D.zoom = 0.4;
@@ -855,6 +887,10 @@
     }
 
     function damage(n) {
+      if (devInvincible) {
+        hitFlash = Math.max(hitFlash, 0.08);
+        return;
+      }
       if (player.invuln > 0) return;
       player.hp -= n;
       player.invuln = 0.8;
@@ -1040,12 +1076,38 @@
       player.vx3 = 0;
       player.vz3 = 0;
       boss = {
-        hp: 36, maxHp: 36, x: 0, y: 3.2, z: -18, t: 0, bullets: [], mines: [], lasers: [], phase3Swap: 0,
+        hp: 36, maxHp: 36, x: 0, y: 3.2, z: -34, t: 0, bullets: [], mines: [], lasers: [], phase3Swap: 0,
         towerPhase: 1, shielded: true, towers: makeBossTowers(8, 1), skillT: 2.6, skillName: "", introNoticeT: 5.2,
-        defeated: false, hasUsb: false, doorOpen: false,
+        defeated: false, hasUsb: false, doorOpen: false, mazeStarted: false,
         usb: { x: 0, y: 1, z: -13, active: false },
         device: { x: 0, y: 1.4, z: -43, active: false }
       };
+    }
+
+    function startBossDiscovery() {
+      release3DPointerLock();
+      state = STATE_BOSS_DISCOVERY;
+      storyT = 0;
+      whiteout = 0.25;
+      mouse.down = false;
+      mouse.right = false;
+      keys.clear();
+      beep(90, 0.42, "sawtooth", 0.075, 2.4);
+      noiseBurst(0.22, 0.08);
+      addShake(18, 0.35);
+    }
+
+    function applyBossPrototype() {
+      player.maxHp = 15;
+      player.hp = 15;
+      player.bossPrototype = true;
+      player.parryChargeCount = 0;
+      player.swordEnergy = 0;
+      player.chargedSlashHold = 0;
+      player.chargedSlashFired = false;
+      player.invuln = Math.max(player.invuln, 1.2);
+      beep(1100, 0.18, "triangle", 0.07, 0.55);
+      burst(W / 2, H * 0.5, "#66ffff", 54, 520);
     }
 
     function makeBossTowers(count = 8, phase = 1) {
@@ -1056,9 +1118,9 @@
         const row = Math.floor(i / 2);
         towers.push({
           kind: "tower",
-          x: side * (12.5 + (row % 2) * 7.5 + phase * 1.8),
+          x: side * (36 + (row % 2) * 22 + phase * 4.2),
           y: 2.2 + phase * 0.18,
-          z: -11 - row * (12.5 + phase),
+          z: -28 - row * (32 + phase * 2.4),
           hp,
           maxHp: hp,
           phase,
@@ -1086,6 +1148,7 @@
         return;
       }
       t.alive = false;
+      spawnTowerExplosion(t);
       bossFlash = 0.18;
       parrySuccessT = Math.max(parrySuccessT, 0.35);
       beep(240, 0.18, "sawtooth", 0.075, 2.4);
@@ -1114,6 +1177,19 @@
       return false;
     }
 
+    function spawnTowerExplosion(t) {
+      const vp = current3DViewport();
+      const p = project3D(t.x, t.y || 2.4, t.z, vp.x, vp.y, vp.w, vp.h);
+      if (p) {
+        burst(p.x, p.y, "#ff3030", 46, 520);
+        burst(p.x, p.y, "#ffffff", 24, 360);
+      } else {
+        burst(W / 2, H * 0.42, "#ff3030", 38, 480);
+      }
+      noiseBurst(0.09, 0.07);
+      addShake(20, 0.24);
+    }
+
     function damageBossCore(amount) {
       if (!boss || boss.defeated) return;
       if (boss.shielded) {
@@ -1125,31 +1201,32 @@
       boss.hp = Math.max(0, boss.hp - amount);
       bossFlash = 0.16;
       addShake(12, 0.16);
+      if (state === STATE_BOSS_P1 && !boss.mazeStarted && boss.hp > 0 && boss.hp <= boss.maxHp * 0.5) {
+        boss.mazeStarted = true;
+        startBossMaze();
+        return;
+      }
       if (boss.hp <= 0) defeatBoss();
     }
 
     function startBossMaze() {
-      release3DPointerLock();
-      state = STATE_BOSS_P2;
-      whiteout = 0.5;
-      player.x = 300;
-      player.y = 220;
-      player.vx = 0;
-      player.vy = 0;
-      world.gravity = 4500;
-      bossMaze = {
-        spikeY: -160,
-        portal: rect(1400, 1760, 120, 90),
-        breaks: [
-          { x: 720, y: 650, w: 220, h: 50, open: false },
-          { x: 1120, y: 1120, w: 240, h: 50, open: false }
-        ],
-        solids: [
-          rect(0, 0, 80, 2000), rect(1660, 0, 80, 2000), rect(0, 1920, 1740, 80),
-          rect(80, 470, 760, 55), rect(980, 470, 680, 55), rect(80, 930, 1080, 55),
-          rect(1320, 930, 340, 55), rect(80, 1390, 760, 55), rect(990, 1390, 670, 55)
-        ]
-      };
+      if (!boss || boss.defeated) return;
+      state = STATE_BOSS_P1;
+      request3DPointerLock();
+      boss.towerPhase = 2;
+      boss.hp = boss.maxHp;
+      boss.shielded = true;
+      boss.towers = makeBossTowers(4, 2);
+      boss.bullets.length = 0;
+      boss.lasers.length = 0;
+      boss.skillT = 1.8;
+      boss.skillName = lang === "ko" ? "코어 방어막 재구성" : "CORE SHIELD REFORMED";
+      boss.skillNoticeT = 2.4;
+      whiteout = 0.35;
+      bossFlash = 0.45;
+      beep(120, 0.28, "sawtooth", 0.07, 1.9);
+      burst(W / 2, H * 0.42, "#ff3030", 58, 640);
+      addShake(24, 0.35);
     }
 
     function enterBossP3() {
@@ -1162,6 +1239,7 @@
       player.x = 560;
       player.y = 1180;
       boss.towerPhase = 2;
+      boss.hp = boss.maxHp;
       boss.shielded = true;
       boss.towers = makeBossTowers(4, 2);
       boss.skillName = msg("bossShieldHint");
@@ -1261,6 +1339,8 @@
         screenShake.max = 0;
       }
       updateScreenFx(dt);
+      for (const fx of chargedSlashFx) fx.t -= dt;
+      for (let i = chargedSlashFx.length - 1; i >= 0; i--) if (chargedSlashFx[i].t <= 0) chargedSlashFx.splice(i, 1);
 
       if (tutorialPause) {
         tutorialPause.t -= dt;
@@ -1279,6 +1359,7 @@
       if (state === STATE_TUTORIAL) update2D(dt, tutorialFloors, tutorialWalls);
       if (state === STATE_OPENING) updateOpening(dt);
       if (state === STATE_GAME_3D_BYPASS) update3DBypass(dt);
+      if (state === STATE_BOSS_DISCOVERY) updateBossDiscovery(dt);
       if (state === STATE_BOSS_P1) updateBossP1(dt);
       if (state === STATE_BOSS_P2) updateBossMaze(dt);
       if (state === STATE_BOSS_P3) updateBossP3(dt);
@@ -1350,6 +1431,10 @@
         for (const lz of skyLasers) {
           lz.t -= dt;
           if (!lz.hit && lz.t < lz.warn) {
+            if (!lz.fired) {
+              lz.fired = true;
+              beep(1280, 0.06, "square", 0.045, 0.7);
+            }
             const beam = rect(lz.x - 16, -200, 32, world.h + 300);
             if (aabb(playerBox(), beam)) {
               damage(0.5);
@@ -1361,6 +1446,10 @@
         for (const lz of sideLasers) {
           lz.t -= dt;
           if (!lz.hit && lz.t < lz.warn) {
+            if (!lz.fired) {
+              lz.fired = true;
+              beep(1180, 0.07, "square", 0.045, 0.75);
+            }
             const beam = rect(camera2D.x - W / camera2D.zoom - 200, lz.y - 14, W / camera2D.zoom * 2 + 400, 28);
             if (aabb(playerBox(), beam)) {
               damage(0.5);
@@ -1371,7 +1460,7 @@
         for (let i = sideLasers.length - 1; i >= 0; i--) if (sideLasers[i].t <= 0) sideLasers.splice(i, 1);
 
         for (const p of inversionPads) {
-          if (!p.used && aabb(playerBox(), p)) {
+          if (!devInvincible && !p.used && aabb(playerBox(), p)) {
             p.used = true;
             world.gravity *= -1;
             player.vy = world.gravity > 0 ? -700 : 700;
@@ -1380,12 +1469,13 @@
 
         for (const d of deadSectors) {
           const on = ((gameTime + d.phase) % 1) < 0.52;
-          if (on && aabb(playerBox(), d)) damage(0.5);
+          if (on && aabb(playerBox(), d)) damage(2);
         }
         for (const w of waterfalls) {
+          if (devInvincible) continue;
           if (aabb(playerBox(), w)) glitchBlind = Math.max(glitchBlind, 2.4);
         }
-      } else if (state === STATE_TUTORIAL && aabb(playerBox(), tutorialTrapSamples.waterfall)) {
+      } else if (!devInvincible && state === STATE_TUTORIAL && aabb(playerBox(), tutorialTrapSamples.waterfall)) {
         glitchBlind = Math.max(glitchBlind, 2.4);
       }
 
@@ -1408,7 +1498,10 @@
 
       chasingWall.fringe += dt * 30;
       if (state === STATE_GAME_2D) {
-        chasingWall.x += chasingWall.speed * dt;
+        const visibleLeft = camera2D.x - W / camera2D.zoom / 2;
+        const offscreenGap = visibleLeft - chasingWall.x;
+        const catchupBoost = offscreenGap > 260 ? clamp((offscreenGap - 260) * 0.55, 0, 520) : 0;
+        chasingWall.x += (chasingWall.speed + catchupBoost) * dt;
         if (player.x < chasingWall.x + 58) damage(10);
       } else {
         chasingWall.x = Math.min(chasingWall.x, player.x - 900);
@@ -1425,15 +1518,41 @@
       if (state === STATE_TUTORIAL && trainingPortal.completed && aabb(playerBox(), tutorialExitPortal)) {
         enterMainMap();
       }
+      if (state === STATE_TUTORIAL && devBossRift.open && !trainingPortal.completed && aabb(playerBox(), devBossRift)) {
+        startBossDiscovery();
+      }
       if (state === STATE_TUTORIAL) {
+        updateDevBossRift(dt);
         updateTutorialPrompts();
         updateTutorialEnemies(dt);
       }
 
-      if (state === STATE_GAME_2D && gates.every(g => g.cleared) && aabb(playerBox(), bossPortal2D)) enterBoss();
+      if (state === STATE_GAME_2D && gates.every(g => g.cleared) && aabb(playerBox(), bossPortal2D)) startBossDiscovery();
 
       camera2D.x = lerp(camera2D.x, player.x + player.vx * 0.16, Math.min(1, dt * 4));
       camera2D.y = lerp(camera2D.y, player.y - 100, Math.min(1, dt * 4));
+    }
+
+    function updateDevBossRift(dt) {
+      if (!devInvincible || trainingPortal.completed) {
+        devBossRift.hold = 0;
+        devBossRift.open = false;
+        return;
+      }
+      const near = aabb(playerBox(), rect(devBossRift.x - 120, devBossRift.y - 90, devBossRift.w + 240, devBossRift.h + 180));
+      if (!devBossRift.open && near && keys.has("KeyE")) {
+        devBossRift.hold = Math.min(5, devBossRift.hold + dt);
+        if (devBossRift.hold >= 5) {
+          devBossRift.open = true;
+          beep(70, 0.45, "sawtooth", 0.08, 2.6);
+          noiseBurst(0.22, 0.08);
+          burst(W / 2, H * 0.42, "#ff2020", 56, 620);
+          addShake(22, 0.4);
+        }
+      } else if (!devBossRift.open) {
+        devBossRift.hold = Math.max(0, devBossRift.hold - dt * 1.5);
+      }
+      if (devBossRift.open && near && keys.has("KeyE")) startBossDiscovery();
     }
 
     function queueTutorialPause(id, key, duration = 2.1) {
@@ -1545,16 +1664,24 @@
         box = playerBox();
       }
       if (player.y > world.h + 400 || player.y < -700) {
-        if (state === STATE_TUTORIAL) {
-          const safe = safeLandingPoint(player.x, player.y, tutorialFloors);
-          player.x = safe.x;
-          player.y = safe.y;
-          player.vx = 0;
-          player.vy = 0;
+        if (state === STATE_TUTORIAL || devInvincible) {
+          restorePlayerToSafe2DSpot(baseFloors);
         } else {
           damage(10);
         }
       }
+    }
+
+    function restorePlayerToSafe2DSpot(floorSet) {
+      const safe = safeLandingPoint(player.x, player.y, floorSet?.length ? floorSet : floors);
+      player.x = safe.x;
+      player.y = safe.y;
+      player.vx = 0;
+      player.vy = 0;
+      player.hook = null;
+      world.gravity = 4500;
+      addShake(5, 0.1);
+      if (devInvincible) burst(W / 2, H * 0.42, "#66ffff", 18, 280);
     }
 
     function tryHook() {
@@ -1727,16 +1854,17 @@
         if (room?.tutorial && room.tutorialStep === 2) completeTrainingStep();
       }
       if (player.dashT <= 0) camera3D.fovTarget = 75;
-      if (mouse.justDown && player.slashCd <= 0) slash3D();
+      updateChargedSlashHold(dt);
+      if (mouse.justDown && player.slashCd <= 0 && !canChargeRangedSlash()) slash3D();
       if (mouse.justRight && player.parryCd <= 0) {
-        player.parryT = 0.13;
+        player.parryT = player.bossPrototype ? 0.2 : 0.13;
         player.parryFxT = 0.28;
         player.parryPending = true;
         player.parryCd = 0.5;
         beep(760, 0.08, "square", 0.04, 0.85);
       }
-      const roomHalf = isBossState() ? 24 : 14;
-      const minZ = isBossState() ? (boss?.defeated ? -58 : -52) : -38;
+      const roomHalf = isBossState() ? 82 : 14;
+      const minZ = isBossState() ? (boss?.defeated ? -176 : -162) : -38;
       player.px = clamp(player.px + player.vx3 * dt, -roomHalf, roomHalf);
       player.pz = clamp(player.pz + player.vz3 * dt, minZ, 15);
     }
@@ -1744,6 +1872,85 @@
     function current3DViewport() {
       if (state === STATE_BOSS_P3) return { x: W / 2, y: 0, w: W / 2, h: H };
       return { x: 0, y: 0, w: W, h: H };
+    }
+
+    function canChargeRangedSlash() {
+      return player.bossPrototype && isBossState() && (player.swordEnergy || 0) > 0;
+    }
+
+    function updateChargedSlashHold(dt) {
+      if (!canChargeRangedSlash() || player.slashCd > 0) {
+        player.chargedSlashHold = 0;
+        player.chargedSlashFired = false;
+        return;
+      }
+      if (!mouse.down) {
+        player.chargedSlashHold = 0;
+        player.chargedSlashFired = false;
+        return;
+      }
+      player.chargedSlashHold = Math.min(1.5, (player.chargedSlashHold || 0) + dt);
+      if (!player.chargedSlashFired && player.chargedSlashHold >= 1.5) fireChargedRangedSlash();
+    }
+
+    function fireChargedRangedSlash() {
+      player.chargedSlashFired = true;
+      player.chargedSlashHold = 0;
+      player.swordEnergy = Math.max(0, (player.swordEnergy || 0) - 1);
+      player.slashT = 0.35;
+      player.slashCd = 0.65;
+      const forward = { x: Math.sin(camera3D.yaw), z: -Math.cos(camera3D.yaw) };
+      chargedSlashFx.push({ t: 0.52, max: 0.52, yaw: camera3D.yaw, x: player.px, z: player.pz });
+      const hit = hitChargedSlashTargets(forward);
+      beep(1500, 0.16, "sawtooth", 0.08, 0.55);
+      noiseBurst(0.08, 0.08);
+      burst(W / 2, H * 0.48, hit ? "#ffff66" : "#66ffff", 54, 620);
+      addShake(hit ? 24 : 14, 0.24);
+    }
+
+    function hitChargedSlashTargets(forward) {
+      const maxRange = 180;
+      const width = 6.6;
+      const hits = [];
+      if (boss && (state === STATE_BOSS_P1 || state === STATE_BOSS_P3)) {
+        for (const t of boss.towers || []) {
+          const ray = t.alive ? slashRayHit(t.x, t.z, forward, maxRange, width) : null;
+          if (ray) hits.push({ kind: "tower", target: t, along: ray.along });
+        }
+        const bossRay = slashRayHit(boss.x, boss.z, forward, maxRange, 6.2);
+        if (bossRay) hits.push({ kind: "boss", along: bossRay.along });
+      }
+      if (room) {
+        for (const e of room.enemies) {
+          const ray = e.alive ? slashRayHit(e.x, e.z, forward, maxRange, width) : null;
+          if (ray) hits.push({ kind: "enemy", target: e, along: ray.along });
+        }
+      }
+      hits.sort((a, b) => a.along - b.along);
+      const first = hits[0];
+      if (!first) return false;
+      if (first.kind === "tower") {
+        first.target.hp = 0;
+        breakBossTower(first.target);
+      } else if (first.kind === "boss") {
+        damageBossCore(6);
+      } else if (first.kind === "enemy") {
+        const e = first.target;
+        e.hitT = 0.28;
+        e.hp = 0;
+        e.alive = false;
+        maybeDropHealthPickup(e.x, e.z);
+      }
+      return true;
+    }
+
+    function slashRayHit(x, z, forward, maxRange, width) {
+      const dx = x - player.px;
+      const dz = z - player.pz;
+      const along = dx * forward.x + dz * forward.z;
+      if (along < 0 || along > maxRange) return null;
+      const lateral = Math.abs(dx * forward.z - dz * forward.x);
+      return lateral <= width ? { along, lateral } : null;
     }
 
     function slash3D() {
@@ -1768,12 +1975,14 @@
     }
 
     function hit3DEnemy(e) {
+      e.hitT = 0.18;
       if (e.guardT > 0) {
         beep(360, 0.08, "square", 0.05, 0.6);
         burst(W / 2, H / 2, "#66ffff", 14, 260);
         return;
       }
       if (room?.tutorial) {
+        e.hitT = 0.22;
         e.stun = 0.35;
         beep(780, 0.09, "triangle", 0.06, 1.5);
         burst(W / 2, H / 2, "#66ffff", 24, 380);
@@ -1781,12 +1990,14 @@
         return;
       }
       if (e.type === "drone") {
+        e.hitT = 0.22;
         beep(240, 0.08, "square", 0.045, 0.7);
         burst(W / 2, H / 2, "#66ffff", 16, 260);
         e.guardT = 0.5;
         return;
       }
       if (e.type === "shield" && e.armor) {
+        e.hitT = 0.28;
         e.armor = false;
         e.stun = 0.55;
         beep(260, 0.11, "square", 0.075, 0.45);
@@ -1795,6 +2006,7 @@
         return;
       }
       e.hp -= 1;
+      e.hitT = 0.24;
       e.stun = 0.18;
       burst(W / 2, H / 2, "#fff", 16, 320);
       if (e.hp <= 0) {
@@ -1898,6 +2110,7 @@
       for (const e of room.enemies) {
         if (!e.alive) continue;
         e.guardT = Math.max(0, (e.guardT || 0) - dt);
+        e.hitT = Math.max(0, (e.hitT || 0) - dt);
         if (e.knockT > 0) {
           e.knockT -= dt;
           e.x += (e.vx || 0) * dt;
@@ -1924,7 +2137,7 @@
         }
         if (e.stun <= 0) {
           const n = norm(player.px - e.x, player.pz - e.z);
-          let spd = e.type === "brute" ? 4.7 : (e.type === "drone" ? 5.7 : (e.type === "miniDrone" ? 10.8 : (e.type === "chain" ? 6.6 : (e.type === "shield" ? 5.5 : 7.1))));
+          let spd = e.type === "brute" ? 4.7 : (e.type === "drone" ? 5.7 : (e.type === "miniDrone" ? 10.8 : (e.type === "chain" ? 11.5 : (e.type === "shield" ? 5.5 : 7.1))));
           if (e.type === "chain" && e.chainWindup > 0) {
             e.chainWindup -= dt;
             if (e.chainWindup <= 0) {
@@ -1967,7 +2180,7 @@
           if (e.type === "brute" && e.shot <= 0) {
             e.shot = 1.65;
             const ownedShots = room.bullets.filter(b => !b.dead && b.owner === e.id).length;
-            if (ownedShots < 2) room.bullets.push(makeBullet(e.x, e.z, player.px, player.pz, true, e.id));
+            if (ownedShots < 3) room.bullets.push(makeBullet(e.x, e.z, player.px, player.pz, true, e.id));
           } else if (e.type === "chain" && distToPlayer < 9.2 && e.shot <= 0) {
             e.chainWindup = 0.46;
             e.chainTarget = { x: player.px, z: player.pz };
@@ -1996,14 +2209,23 @@
           for (const e of room.enemies) {
             if (e.alive && len(e.x - b.x, e.z - b.z) < 1.2) {
               b.dead = true;
+              e.hitT = 0.24;
               if (e.type === "drone") {
-                spawnMiniDrones(e);
-                e.alive = false;
-                maybeDropHealthPickup(e.x, e.z);
-                beep(920, 0.13, "triangle", 0.07, 0.35);
-                burst(W / 2, H / 2, "#66ffff", 30, 460);
-                addShake(10, 0.16);
+                e.hp = Math.max(0, (e.hp || 1) - 1);
+                e.stun = 0.55;
+                beep(760, 0.08, "triangle", 0.055, 1.35);
+                burst(W / 2, H / 2, "#66ffff", 20, 360);
+                addShake(7, 0.12);
+                if (e.hp <= 0) {
+                  spawnMiniDrones(e);
+                  e.alive = false;
+                  maybeDropHealthPickup(e.x, e.z);
+                  beep(920, 0.13, "triangle", 0.07, 0.35);
+                  burst(W / 2, H / 2, "#66ffff", 30, 460);
+                  addShake(10, 0.16);
+                }
               } else if (e.type === "shield" && e.armor) {
+                e.hitT = 0.28;
                 e.armor = false;
                 e.stun = 0.65;
                 e.guardT = 0;
@@ -2011,6 +2233,7 @@
                 burst(W / 2, H / 2, "#fff", 24, 380);
                 addShake(9, 0.16);
               } else {
+                e.hitT = 0.24;
                 e.hp = Math.max(0, (e.hp || 1) - 1);
                 e.stun = 0.45;
                 beep(720, 0.09, "triangle", 0.055, 1.35);
@@ -2108,32 +2331,44 @@
 
     function makeBullet(x, z, tx, tz, homing, owner = "") {
       const n = norm(tx - x, tz - z);
-      return { x, z, vx: n.x * 17, vz: n.y * 17, r: 0.32, homing, owner, reflected: false, dead: false };
+      return { x, z, vx: n.x * 17, vz: n.y * 17, r: 0.32, homing, owner, age: 0, life: homing ? 5 : 0, reflected: false, dead: false };
     }
 
     function makeBeam(x, z, tx, tz) {
       const n = norm(tx - x, tz - z);
+      beep(1320, 0.045, "square", 0.035, 0.72);
       return { x, z, vx: n.x * 32, vz: n.y * 32, r: 0.24, homing: false, beam: true, reflected: false, dead: false };
     }
 
     function updateBullets(bullets, dt, onHit) {
       for (const b of bullets) {
         if (b.dead) continue;
+        b.age = (b.age || 0) + dt;
+        if (b.life && !b.reflected && b.age > b.life) {
+          b.dead = true;
+          continue;
+        }
         if (b.homing && !b.reflected) {
           const n = norm(player.px - b.x, player.pz - b.z);
           const speed = b.tower ? 18 : 22;
           b.vx = lerp(b.vx, n.x * speed, dt * 1.7);
           b.vz = lerp(b.vz, n.y * speed, dt * 1.7);
         }
-        if (player.parryT > 0 && !b.reflected && len(player.px - b.x, player.pz - b.z) < 3.6) {
-          b.vx *= -2.5;
-          b.vz *= -2.5;
+        const parryRadius = player.bossPrototype ? 5.2 : 3.6;
+        if (player.parryT > 0 && !b.reflected && len(player.px - b.x, player.pz - b.z) < parryRadius) {
+          const forward = { x: Math.sin(camera3D.yaw), z: -Math.cos(camera3D.yaw) };
+          const speed = Math.max(38, len(b.vx, b.vz) * 2.25);
+          b.vx = forward.x * speed;
+          b.vz = forward.z * speed;
           b.reflected = true;
+          b.homing = false;
+          b.owner = "";
           player.parryT = 0;
           player.parryFxT = Math.max(player.parryFxT || 0, 0.22);
           player.parryPending = false;
           bossFlash = 0.08;
           parrySuccessT = 0.45;
+          registerParrySuccessCharge();
           beep(1960, 0.045, "square", 0.095, 0.62);
           beep(760, 0.07, "triangle", 0.06, 2.4);
           noiseBurst(0.035, 0.065);
@@ -2143,15 +2378,36 @@
         }
         b.x += b.vx * dt;
         b.z += b.vz * dt;
+        if (bulletHitsPillar(b)) {
+          b.dead = true;
+          continue;
+        }
         if (!b.reflected && len(player.px - b.x, player.pz - b.z) < 1.1) {
           if (!room?.tutorial) damage(1);
           if (b.chain) player.stun3D = Math.max(player.stun3D || 0, 0.7);
           b.dead = true;
         }
         onHit?.(b);
-        if (Math.abs(b.x) > 60 || Math.abs(b.z) > 70) b.dead = true;
+        if (Math.abs(b.x) > 210 || Math.abs(b.z) > 230) b.dead = true;
       }
       for (let i = bullets.length - 1; i >= 0; i--) if (bullets[i].dead) bullets.splice(i, 1);
+    }
+
+    function registerParrySuccessCharge() {
+      if (!player.bossPrototype) return;
+      player.parryChargeCount = (player.parryChargeCount || 0) + 1;
+      if (player.parryChargeCount >= 3) {
+        player.parryChargeCount = 0;
+        player.swordEnergy = Math.min(3, (player.swordEnergy || 0) + 1);
+        beep(1320, 0.16, "triangle", 0.08, 1.65);
+        burst(W / 2, H * 0.58, "#66ffff", 34, 420);
+        addShake(9, 0.14);
+      }
+    }
+
+    function bulletHitsPillar(b) {
+      if (state !== STATE_GAME_3D_BYPASS || !room?.pillars?.length) return false;
+      return room.pillars.some(p => len(b.x - p.x, b.z - p.z) < 0.9 + (b.r || 0.25));
     }
 
     function hasParryOpportunity() {
@@ -2159,7 +2415,8 @@
       const sources = [];
       if (room?.bullets) sources.push(...room.bullets);
       if (boss?.bullets) sources.push(...boss.bullets);
-      return sources.some(b => !b.dead && !b.reflected && len(player.px - b.x, player.pz - b.z) < 4.6);
+      const radius = player.bossPrototype ? 6.3 : 4.6;
+      return sources.some(b => !b.dead && !b.reflected && len(player.px - b.x, player.pz - b.z) < radius);
     }
 
     function updateBossP1(dt) {
@@ -2187,7 +2444,10 @@
         if (b.reflected && len(boss.x - b.x, boss.z - b.z) < 3.6) {
           damageBossCore(2);
           b.dead = true;
-          if (!boss.shielded && boss.hp <= 23) startBossMaze();
+          if (!boss.shielded && !boss.mazeStarted && boss.hp <= boss.maxHp * 0.5) {
+            boss.mazeStarted = true;
+            startBossMaze();
+          }
         }
       });
     }
@@ -2198,19 +2458,21 @@
       boss.skillT -= dt;
       if (boss.skillT > 0) return;
       const alive = boss.towers?.filter(t => t.alive) || [];
-      const pick = Math.floor(gameTime * 0.63 + (boss.towerPhase || 1)) % 4;
-      boss.skillT = boss.shielded ? 3.0 : 2.35;
+      const phase = boss.towerPhase || 1;
+      const pick = Math.floor(gameTime * 0.87 + phase * 2.1) % 7;
+      boss.skillT = boss.shielded ? Math.max(2.0, 3.0 - phase * 0.22) : Math.max(1.55, 2.35 - phase * 0.18);
       if (pick === 3) {
         boss.skillName = "CORE LASER";
         boss.skillNoticeT = 1.3;
         boss.lasers = boss.lasers || [];
-        boss.lasers.push({ x: clamp(player.px, -20, 20), z: clamp(player.pz - 3, -48, 12), t: 1.35, warn: 0.85, hit: false });
+        boss.lasers.push({ x: clamp(player.px, -74, 74), z: clamp(player.pz - 3, -154, 12), t: 1.35, warn: 0.85, hit: false });
+        if (phase >= 2) boss.lasers.push({ x: clamp(player.px + (player.px > 0 ? -9 : 9), -74, 74), z: clamp(player.pz - 10, -154, 12), t: 1.55, warn: 0.95, hit: false });
         beep(160, 0.16, "sawtooth", 0.055, 0.65);
       } else if (pick === 0 && alive.length) {
         boss.skillName = "TOWER LANCE";
         boss.skillNoticeT = 1.0;
         alive.forEach((t, i) => {
-          if (i % 2 === Math.floor(gameTime) % 2) {
+          if (i % 2 === Math.floor(gameTime) % 2 || phase >= 3) {
             const b = makeBullet(t.x, t.z, player.px, player.pz, true);
             b.vx *= 0.92;
             b.vz *= 0.92;
@@ -2223,27 +2485,66 @@
         boss.skillName = "GRAVITY PULSE";
         boss.skillNoticeT = 1.0;
         const n = norm(player.px - boss.x, player.pz - boss.z);
-        player.vx3 += n.x * 18;
-        player.vz3 += n.y * 18;
-        for (let i = 0; i < 6; i++) {
-          const a = i / 6 * Math.PI * 2 + gameTime;
-          boss.bullets.push({ x: boss.x, z: boss.z, vx: Math.cos(a) * 24, vz: Math.sin(a) * 24, r: 0.22, beam: true, reflected: false, homing: false, dead: false });
+        player.vx3 += n.x * (18 + phase * 3);
+        player.vz3 += n.y * (18 + phase * 3);
+        const count = 6 + phase * 2;
+        for (let i = 0; i < count; i++) {
+          const a = i / count * Math.PI * 2 + gameTime;
+          boss.bullets.push({ x: boss.x, z: boss.z, vx: Math.cos(a) * (22 + phase * 3), vz: Math.sin(a) * (22 + phase * 3), r: 0.22, beam: true, reflected: false, homing: false, dead: false });
         }
         addShake(18, 0.24);
         beep(120, 0.16, "sawtooth", 0.055, 1.8);
-      } else {
+      } else if (pick === 2) {
         boss.skillName = "MIRROR CUT";
         boss.skillNoticeT = 1.0;
         const side = player.px > 0 ? -1 : 1;
-        boss.x = side * 6;
-        for (let i = -1; i <= 1; i++) {
-          const b = makeBeam(boss.x + i * 1.5, boss.z + 2, player.px, player.pz);
+        boss.x = side * (8 + phase * 4);
+        for (let i = -1 - Math.floor(phase / 2); i <= 1 + Math.floor(phase / 2); i++) {
+          const b = makeBeam(boss.x + i * 2.2, boss.z + 2, player.px, player.pz);
           b.vx *= 0.9;
           b.vz *= 0.9;
           boss.bullets.push(b);
         }
         bossFlash = 0.22;
         addShake(12, 0.2);
+      } else if (pick === 4) {
+        boss.skillName = "RING SWEEP";
+        boss.skillNoticeT = 1.05;
+        const count = 14 + phase * 4;
+        for (let i = 0; i < count; i++) {
+          const a = i / count * Math.PI * 2 + gameTime * 0.4;
+          const b = makeBeam(boss.x + Math.cos(a) * 2, boss.z + Math.sin(a) * 2, boss.x + Math.cos(a) * 40, boss.z + Math.sin(a) * 40);
+          b.vx *= 0.62 + phase * 0.08;
+          b.vz *= 0.62 + phase * 0.08;
+          boss.bullets.push(b);
+        }
+        addShake(16, 0.22);
+      } else if (pick === 5) {
+        boss.skillName = "RIFT BURST";
+        boss.skillNoticeT = 1.05;
+        for (let i = -2; i <= 2; i++) {
+          const spawnX = clamp(player.px + i * 8, -72, 72);
+          const spawnZ = clamp(player.pz - 24 - Math.abs(i) * 4, -154, 8);
+          const b = makeBeam(spawnX, spawnZ, player.px, player.pz);
+          b.vx *= 1.05 + phase * 0.1;
+          b.vz *= 1.05 + phase * 0.1;
+          boss.bullets.push(b);
+        }
+        bossFlash = 0.18;
+        addShake(13, 0.18);
+      } else {
+        boss.skillName = "CHASE NEEDLES";
+        boss.skillNoticeT = 1.0;
+        for (let i = 0; i < 4 + phase * 2; i++) {
+          const a = gameTime * 1.7 + i * Math.PI * 2 / (4 + phase * 2);
+          const sx = boss.x + Math.cos(a) * (10 + phase * 3);
+          const sz = boss.z + Math.sin(a) * (10 + phase * 3);
+          const b = makeBullet(sx, sz, player.px, player.pz, true);
+          b.vx *= 1.15;
+          b.vz *= 1.15;
+          boss.bullets.push(b);
+        }
+        beep(480, 0.08, "square", 0.045, 1.3);
       }
     }
 
@@ -2306,7 +2607,10 @@
       player.jumpHeld = keys.has("Space");
       player.vy += 4500 * dt;
       move2D(dt, mazeSolids, [], true);
-      if (player.y < bossMaze.spikeY + 80) damage(10);
+      if (player.y < bossMaze.spikeY + 80) {
+        if (devInvincible) restorePlayerToSafe2DSpot(mazeSolids);
+        else damage(10);
+      }
       if (aabb(playerBox(), bossMaze.portal)) enterBossP3();
     }
 
@@ -2317,8 +2621,10 @@
       }
       if (!boss.shielded && boss.towerPhase === 2 && boss.hp <= 12) {
         boss.towerPhase = 3;
+        boss.hp = boss.maxHp;
         boss.shielded = true;
         boss.towers = makeBossTowers(2, 3);
+        boss.skillT = 1.5;
         boss.skillName = msg("bossShieldHint");
         boss.skillNoticeT = 2.2;
         bossFlash = 0.35;
@@ -2383,6 +2689,17 @@
       if (storyT > 11.5) startGame();
     }
 
+    function updateBossDiscovery(dt) {
+      storyT += dt;
+      if (storyT > 10.6) {
+        applyBossPrototype();
+        enterBoss();
+      }
+      mouse.justDown = false;
+      mouse.justRight = false;
+      keys.clear();
+    }
+
     function updateEpilogue(dt) {
       storyT += dt;
       if (storyT > 10.5) enterCredits();
@@ -2418,6 +2735,7 @@
       else if (state === STATE_OPENING) drawOpeningCinematic();
       else if (state === STATE_TUTORIAL || state === STATE_GAME_2D) draw2DScene();
       else if (state === STATE_GAME_3D_BYPASS) draw3DScene();
+      else if (state === STATE_BOSS_DISCOVERY) drawBossDiscoveryCinematic();
       else if (state === STATE_BOSS_P1) drawBoss3D();
       else if (state === STATE_BOSS_P2) drawBossMaze();
       else if (state === STATE_BOSS_P3) drawSplitBoss();
@@ -2528,6 +2846,21 @@
       ctx.shadowBlur = 0;
       ctx.font = "15px Consolas, monospace";
       ctx.fillText(`${msg("breach")} // ${msg("start")}`, W / 2, H / 2 + 18);
+      ctx.save();
+      const devX = Math.min(W - 34, W / 2 + 360);
+      const devY = H / 2 - 16;
+      ctx.textAlign = "right";
+      ctx.globalAlpha = 0.82;
+      ctx.fillStyle = "#fff";
+      ctx.shadowColor = "#fff";
+      ctx.shadowBlur = 8;
+      ctx.font = "700 12px Consolas, monospace";
+      ctx.fillText("DEVELOPER", devX, devY);
+      ctx.font = "700 16px Consolas, monospace";
+      ctx.fillText("@tq.limiter", devX, devY + 24);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+      ctx.restore();
       ctx.font = "700 18px Consolas, monospace";
       ctx.fillText(msg("choose"), W / 2, H / 2 + 82);
       ctx.strokeStyle = "#fff";
@@ -2620,6 +2953,71 @@
         ctx.fillText(msg("run"), W / 2, H * 0.28);
         ctx.font = "13px Consolas, monospace";
         ctx.fillText(msg("skip"), W / 2, H * 0.83);
+      }
+      ctx.restore();
+    }
+
+    function drawBossDiscoveryCinematic() {
+      const t = storyT;
+      ctx.save();
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, W, H);
+      drawCinematicBars("#ff2020");
+      drawGlitchRain(t, t > 4.2 ? "#66ffff" : "#ff2020", 0.34);
+      if (t < 3.5) {
+        drawInfectedCore(W * 0.62, H * 0.46, 130 + Math.sin(t * 9) * 8, t, "#ff2020");
+        drawTerminalLines([
+          lang === "ko" ? "알 수 없는 핵심 프로세스 감지" : "UNKNOWN CORE PROCESS DETECTED",
+          lang === "ko" ? "식별명: CORE_VIRUS" : "IDENTITY: CORE_VIRUS",
+          lang === "ko" ? "방어막 계층 다중 중첩" : "MULTIPLE SHIELD LAYERS CONFIRMED"
+        ], t, "#ff2020");
+      } else if (t < 5.0) {
+        const k = clamp((t - 3.5) / 1.5, 0, 1);
+        drawInfectedCore(W * 0.72, H * 0.42, 105, t, "#ff2020");
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#66ffff";
+        ctx.shadowColor = "#66ffff";
+        ctx.shadowBlur = 24;
+        ctx.font = "700 30px Consolas, monospace";
+        ctx.fillText(lang === "ko" ? "조력자의 개입 !" : "ALLY INTERVENTION !", W / 2, H * 0.66);
+        ctx.font = "13px Consolas, monospace";
+        ctx.fillText(lang === "ko" ? "외부 백신 프로토타입 신호 수신" : "EXTERNAL VACCINE PROTOTYPE SIGNAL DETECTED", W / 2, H * 0.72);
+        for (let i = 0; i < 10; i++) {
+          const x = lerp(W * 0.08, W * 0.5, k) - i * 38;
+          line(x, H * 0.36 + Math.sin(t * 10 + i) * 24, x + 64, H * 0.36, i % 2 ? "#66ffff" : "#fff", 2);
+        }
+      } else if (t < 7.6) {
+        const k = clamp((t - 5.0) / 2.6, 0, 1);
+        drawInfectedCore(W * 0.72, H * 0.42, 105, t, "#ff2020");
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#66ffff";
+        ctx.shadowColor = "#66ffff";
+        ctx.shadowBlur = 20;
+        ctx.font = "700 26px Consolas, monospace";
+        ctx.fillText(lang === "ko" ? "백신 프로토타입 수신 중" : "VACCINE PROTOTYPE INCOMING", W / 2, H * 0.68);
+        ctx.font = "14px Consolas, monospace";
+        ctx.fillText(`DOWNLOAD ${(k * 100 | 0).toString().padStart(3, "0")}%`, W / 2, H * 0.73);
+        ctx.strokeStyle = "#66ffff";
+        ctx.strokeRect(W / 2 - 170, H * 0.76, 340, 14);
+        ctx.fillStyle = "#66ffff";
+        ctx.fillRect(W / 2 - 166, H * 0.76 + 4, 332 * k, 6);
+      } else {
+        const k = clamp((t - 7.6) / 3.0, 0, 1);
+        drawCinematicPlayer(W / 2, H * 0.48, t, 2.0 + k * 0.55);
+        for (let i = 0; i < 18; i++) {
+          const a = i / 18 * Math.PI * 2 + t * 2.4;
+          line(W / 2 + Math.cos(a) * 80, H * 0.48 + Math.sin(a) * 80, W / 2 + Math.cos(a) * (170 + k * 120), H * 0.48 + Math.sin(a) * (170 + k * 120), i % 2 ? "#fff" : "#66ffff", 2);
+        }
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#fff";
+        ctx.shadowColor = "#fff";
+        ctx.shadowBlur = 18;
+        ctx.font = "700 24px Consolas, monospace";
+        ctx.fillText(lang === "ko" ? "프로토타입 다운로드 완료" : "PROTOTYPE DOWNLOADED", W / 2, H * 0.72);
+        ctx.font = "13px Consolas, monospace";
+        ctx.fillText(lang === "ko" ? "HP 15 / 패리 3회 성공마다 검 에너지 충전" : "HP 15 / 3 successful parries charge sword energy", W / 2, H * 0.77);
+        ctx.fillText(lang === "ko" ? "패링 지속시간 및 판정 범위 강화" : "Parry window and range enhanced", W / 2, H * 0.81);
+        ctx.fillText(lang === "ko" ? "좌클릭 1.5초 홀드: 원거리 참격" : "Hold LMB 1.5s: ranged critical slash", W / 2, H * 0.85);
       }
       ctx.restore();
     }
@@ -2900,6 +3298,7 @@
         drawTutorialTrapSamples();
         drawTrainingPortal2D();
         if (trainingPortal.completed) drawTutorialExitPortal();
+        else drawDevBossRift();
         drawTutorialEnemies();
       }
       if (state === STATE_TUTORIAL) drawWorldTutorialSigns();
@@ -3359,6 +3758,56 @@
       ctx.restore();
     }
 
+    function drawDevBossRift() {
+      if (!devInvincible && !devBossRift.open) return;
+      const cx = devBossRift.x + devBossRift.w / 2;
+      const cy = devBossRift.y + devBossRift.h / 2;
+      const progress = clamp(devBossRift.hold / 5, 0, 1);
+      ctx.save();
+      if (devBossRift.open) {
+        drawPortal2D(devBossRift, "#ff2020");
+      } else {
+        ctx.globalAlpha = 0.82;
+        ctx.strokeStyle = "#ff2020";
+        ctx.fillStyle = "rgba(255,32,32,0.12)";
+        ctx.shadowColor = "#ff2020";
+        ctx.shadowBlur = 22 / camera2D.zoom;
+        ctx.lineWidth = 3 / camera2D.zoom;
+        ctx.beginPath();
+        for (let i = 0; i < 9; i++) {
+          const y = devBossRift.y + i * devBossRift.h / 8;
+          const x = cx + Math.sin(gameTime * 9 + i * 1.7) * (18 + i % 3 * 9);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        for (let i = 0; i < 18; i++) {
+          const x = cx + Math.sin(gameTime * 17 + i) * 54;
+          const y = devBossRift.y + (i / 18) * devBossRift.h;
+          line(x - 36, y, x + 36, y + Math.sin(i + gameTime * 11) * 18, i % 2 ? "#fff" : "#ff2020", 1.4 / camera2D.zoom);
+        }
+      }
+      ctx.textAlign = "center";
+      ctx.fillStyle = devBossRift.open ? "#ff2020" : "#fff";
+      ctx.shadowColor = "#ff2020";
+      ctx.shadowBlur = 14 / camera2D.zoom;
+      ctx.font = `${Math.max(15, 18 / camera2D.zoom)}px Consolas, monospace`;
+      ctx.fillText(devBossRift.open ? "BOSS PORTAL" : "HOLD E 5s", cx, devBossRift.y - 34);
+      if (!devBossRift.open) {
+        const bw = 210;
+        const bh = 16;
+        const bx = cx - bw / 2;
+        const by = devBossRift.y + devBossRift.h + 34;
+        ctx.fillStyle = "rgba(0,0,0,0.8)";
+        ctx.strokeStyle = "#ff2020";
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.strokeRect(bx, by, bw, bh);
+        ctx.fillStyle = "#ff2020";
+        ctx.fillRect(bx + 3, by + 3, Math.max(0, (bw - 6) * progress), bh - 6);
+      }
+      ctx.restore();
+    }
+
     function drawBossPortal2D() {
       ctx.save();
       drawPortal2D(bossPortal2D, "#ff2020");
@@ -3544,7 +3993,7 @@
         for (const p of roomData.pillars) objs.push({ kind: "pillar", x: p.x, y: p.h / 2, z: p.z, h: p.h });
         for (const e of roomData.enemies) if (e.alive) objs.push({ kind: "enemy", ...e });
         for (const h of roomData.healthPickups || []) if (h.alive) objs.push({ kind: "heal", ...h });
-        for (const b of roomData.bullets) objs.push({ kind: b.reflected ? "whiteBullet" : (b.beam ? "beam" : "bullet"), ...b });
+        for (const b of roomData.bullets) objs.push({ kind: b.beam ? "beam" : (b.reflected ? "whiteBullet" : "bullet"), ...b });
         if (roomData.firewall.active) drawFirewall(roomData.firewall, vx, vy, vw, vh);
         drawGate3D(roomData.returnGate.x, roomData.returnGate.z, vx, vy, vw, vh, roomData.tutorial ? "#66ffff" : "#fff", roomData.gateOpen);
         drawFog(roomData.fog, vx, vy, vw, vh);
@@ -3553,7 +4002,7 @@
         drawBossLaserFields(bossData, vx, vy, vw, vh);
         objs.push({ kind: "boss", x: bossData.x, y: bossData.y, z: bossData.z });
         for (const t of bossData.towers || []) if (t.alive) objs.push({ kind: "tower", ...t });
-        for (const b of bossData.bullets) objs.push({ kind: b.reflected ? "whiteBullet" : (b.beam ? "beam" : "bullet"), ...b });
+        for (const b of bossData.bullets) objs.push({ kind: b.beam ? "beam" : (b.reflected ? "whiteBullet" : "bullet"), ...b });
         for (const m of bossData.mines) if (m.alive) objs.push({ kind: "mine", ...m });
         if (bossData.defeated) {
           objs.push({ kind: "bossDoor", x: 0, y: 2.3, z: -34, open: bossData.doorOpen });
@@ -3568,6 +4017,7 @@
       });
       for (const o of objs) draw3DObject(o, vx, vy, vw, vh);
       if (roomData?.chainStrikes) roomData.chainStrikes.forEach(s => drawChainStrike(s, vx, vy, vw, vh));
+      drawChargedSlashFx(vx, vy, vw, vh);
       if (roomData) drawSlashTargetHint(roomData, vx, vy, vw, vh);
       if (bossData?.defeated) drawBossAftermathHint(bossData, vx, vy, vw, vh);
       drawKatana(vx, vy, vw, vh);
@@ -3579,8 +4029,8 @@
     function draw3DGrid(vx, vy, vw, vh) {
       ctx.strokeStyle = "rgba(255,255,255,0.18)";
       ctx.lineWidth = 1;
-      const half = isBossState() ? 26 : 16;
-      const farZ = isBossState() ? -62 : -42;
+      const half = isBossState() ? 86 : 16;
+      const farZ = isBossState() ? -180 : -42;
       for (let x = -half; x <= half; x += 2) {
         const a = project3D(x, 0, 18, vx, vy, vw, vh);
         const b = project3D(x, 0, farZ, vx, vy, vw, vh);
@@ -3597,7 +4047,7 @@
       const p = project3D(o.x, o.y || 1, o.z, vx, vy, vw, vh);
       if (!p) return;
       let size = 1;
-      if (o.kind === "boss") size = 4.8;
+      if (o.kind === "boss") size = 6.8;
       else if (o.kind === "tower") size = 1.55 + (o.phase || 1) * 0.28;
       else if (o.kind === "bossDoor") size = 2.4;
       else if (o.kind === "usb") size = 0.85;
@@ -3611,15 +4061,26 @@
       else if (o.kind === "mine") size = 0.75;
       else if (o.kind === "beam") size = 0.55;
       else if (o.kind.includes("Bullet") || o.kind === "bullet") size = 0.45;
-      const s = clamp(p.s * size, 2, 260);
+      const s = clamp(p.s * size, 2, o.kind === "boss" ? 390 : 260);
+      const enemyHit = o.kind === "enemy" && (o.hitT || 0) > 0;
+      const hitPulse = enemyHit ? clamp((o.hitT || 0) / 0.28, 0, 1) : 0;
       ctx.save();
       ctx.translate(p.x, p.y);
+      if (enemyHit) {
+        const shake = Math.max(1.5, s * 0.16) * hitPulse;
+        ctx.translate(Math.sin(gameTime * 95 + o.x * 3.1) * shake, Math.cos(gameTime * 87 + o.z * 2.4) * shake);
+        ctx.rotate(Math.sin(gameTime * 70) * 0.08 * hitPulse);
+      }
       ctx.fillStyle = o.kind === "whiteBullet" ? "#fff" : "#000";
       ctx.strokeStyle = o.kind === "beam" ? "#66ffff" : (o.kind === "bullet" || o.homing ? "red" : "#fff");
       if (o.guardT > 0) ctx.strokeStyle = "#66ffff";
+      if (enemyHit) {
+        ctx.strokeStyle = hitPulse > 0.45 ? "#ffff66" : "#ffffff";
+        ctx.fillStyle = `rgba(255,255,255,${0.12 + hitPulse * 0.28})`;
+      }
       ctx.lineWidth = o.kind === "boss" ? 3 : 2;
       ctx.shadowColor = ctx.strokeStyle;
-      ctx.shadowBlur = o.kind === "boss" ? 20 : 9;
+      ctx.shadowBlur = enemyHit ? 24 : (o.kind === "boss" ? 20 : 9);
       if (o.kind === "pillar") {
         ctx.fillRect(-s * 0.7, -s * (o.h || 3), s * 1.4, s * (o.h || 3));
         ctx.strokeRect(-s * 0.7, -s * (o.h || 3), s * 1.4, s * (o.h || 3));
@@ -3756,12 +4217,15 @@
         ctx.fillRect(-s * 1.1, -s * 3.30, s * 2.2 * hpRatio, s * 0.12);
       } else if (o.kind === "beam") {
         ctx.rotate(Math.atan2(o.vz || 0, o.vx || 1));
-        ctx.fillStyle = "#66ffff";
-        ctx.strokeStyle = "#66ffff";
-        ctx.shadowColor = "#66ffff";
+        const beamColor = o.reflected ? "#ffff66" : "#ff3030";
+        const beamCore = o.reflected ? "#ffffff" : "#ffb0b0";
+        ctx.fillStyle = beamColor;
+        ctx.strokeStyle = beamColor;
+        ctx.shadowColor = beamColor;
         ctx.fillRect(-s * 2.1, -s * 0.35, s * 4.2, s * 0.7);
         ctx.strokeRect(-s * 2.1, -s * 0.55, s * 4.2, s * 1.1);
-        line(-s * 2.5, 0, s * 2.5, 0, "#fff", 1.5);
+        line(-s * 2.5, 0, s * 2.5, 0, beamCore, 1.8);
+        if (o.reflected) line(-s * 1.7, -s * 0.82, s * 1.7, s * 0.82, "#ffffff", 1.1);
       } else if (o.kind === "mine" || o.kind === "bullet" || o.kind === "whiteBullet") {
         ctx.beginPath();
         ctx.arc(0, 0, s, 0, Math.PI * 2);
@@ -3921,6 +4385,41 @@
         ctx.rotate(u * Math.PI + progress * 2);
         ctx.strokeRect(-6, -4, 12, 8);
         ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    function drawChargedSlashFx(vx, vy, vw, vh) {
+      if (!chargedSlashFx.length) return;
+      ctx.save();
+      for (const fx of chargedSlashFx) {
+        const age = 1 - fx.t / fx.max;
+        const forward = { x: Math.sin(fx.yaw), z: -Math.cos(fx.yaw) };
+        const right = { x: Math.cos(fx.yaw), z: Math.sin(fx.yaw) };
+        const dist = 8 + age * 92;
+        const cx = fx.x + forward.x * dist;
+        const cz = fx.z + forward.z * dist;
+        const a = project3D(cx - right.x * 8, 2.0, cz - right.z * 8, vx, vy, vw, vh);
+        const b = project3D(cx + right.x * 8, 2.0, cz + right.z * 8, vx, vy, vw, vh);
+        const c = project3D(cx, 2.0 + Math.sin(age * Math.PI) * 4.2, cz, vx, vy, vw, vh);
+        if (!a || !b || !c) continue;
+        const alpha = clamp(fx.t / fx.max, 0, 1);
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = "#ffff66";
+        ctx.fillStyle = "rgba(255,255,102,0.20)";
+        ctx.shadowColor = "#ffff66";
+        ctx.shadowBlur = 34;
+        ctx.lineWidth = 7 + Math.sin(age * Math.PI) * 8;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.quadraticCurveTo(c.x, c.y, b.x, b.y);
+        ctx.stroke();
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = "#ffffff";
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y + 10);
+        ctx.quadraticCurveTo(c.x, c.y - 8, b.x, b.y + 10);
+        ctx.stroke();
       }
       ctx.restore();
     }
@@ -4139,12 +4638,14 @@
       const eased = 1 - Math.pow(1 - swing, 3);
       const cut = player.slashT > 0 ? Math.sin(swing * Math.PI) : 0;
       const parry = Math.max(player.parryT > 0 ? player.parryT / 0.13 : 0, (player.parryFxT || 0) / 0.28);
+      const charge = clamp((player.chargedSlashHold || 0) / 1.5, 0, 1);
+      const energized = player.bossPrototype && (player.swordEnergy || 0) > 0;
       const bladeLen = Math.min(vw, vh) * 0.42;
       const handleLen = Math.min(vw, vh) * 0.10;
       const idleAngle = -1.0;
-      const angle = parry > 0 ? -0.48 : (player.slashT > 0 ? lerp(-2.45, -1.05, eased) : idleAngle);
-      const gripX = vx + vw * (0.78 - cut * 0.035 - parry * 0.12);
-      const gripY = vy + vh * (0.84 - cut * 0.055 - parry * 0.16);
+      const angle = charge > 0 ? lerp(-1.35, -1.78, charge) : (parry > 0 ? -0.48 : (player.slashT > 0 ? lerp(-2.45, -1.05, eased) : idleAngle));
+      const gripX = vx + vw * (0.78 - cut * 0.035 - parry * 0.12 - charge * 0.18);
+      const gripY = vy + vh * (0.84 - cut * 0.055 - parry * 0.16 - charge * 0.10);
       const tipX = gripX + Math.cos(angle) * bladeLen;
       const tipY = gripY + Math.sin(angle) * bladeLen;
       const guardAngle = angle + Math.PI / 2;
@@ -4156,12 +4657,12 @@
       ctx.save();
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      ctx.shadowColor = "#fff";
-      ctx.shadowBlur = player.slashT > 0 ? 28 : 10;
+      ctx.shadowColor = energized ? "#66ffff" : "#fff";
+      ctx.shadowBlur = player.slashT > 0 ? 28 : (energized ? 24 : 10);
       line(handleX, handleY, gripX, gripY, "#000", 16);
       line(handleX, handleY, gripX, gripY, "#fff", 4);
       ctx.fillStyle = "#000";
-      ctx.strokeStyle = "#fff";
+      ctx.strokeStyle = energized ? "#66ffff" : "#fff";
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.moveTo(gripX + nx * baseW, gripY + ny * baseW);
@@ -4173,9 +4674,24 @@
       ctx.fill();
       ctx.stroke();
       ctx.globalAlpha = 0.7;
-      line(gripX + nx * 2, gripY + ny * 2, tipX - Math.cos(angle) * 18, tipY - Math.sin(angle) * 18, "#fff", 1.2);
+      line(gripX + nx * 2, gripY + ny * 2, tipX - Math.cos(angle) * 18, tipY - Math.sin(angle) * 18, energized ? "#ffff66" : "#fff", energized ? 2 : 1.2);
       ctx.globalAlpha = 1;
       line(gripX - nx * 34, gripY - ny * 34, gripX + nx * 34, gripY + ny * 34, "#fff", 4);
+      if (energized) {
+        ctx.globalAlpha = 0.45 + Math.sin(gameTime * 18) * 0.18;
+        for (let i = 0; i < 5; i++) {
+          const u = ((i / 5) + gameTime * 0.85) % 1;
+          const x1 = lerp(gripX, tipX, u);
+          const y1 = lerp(gripY, tipY, u);
+          line(x1 - nx * 16, y1 - ny * 16, x1 + nx * 16, y1 + ny * 16, i % 2 ? "#66ffff" : "#ffff66", 1.6 + charge * 2);
+        }
+        ctx.globalAlpha = 0.18 + charge * 0.45;
+        ctx.strokeStyle = charge >= 1 ? "#ffff66" : "#66ffff";
+        ctx.lineWidth = 5 + charge * 5;
+        ctx.beginPath();
+        ctx.arc(vx + vw / 2, vy + vh / 2, Math.min(vw, vh) * (0.16 + charge * 0.08), 0, Math.PI * 2);
+        ctx.stroke();
+      }
       if (parry > 0) {
         ctx.globalAlpha = 0.18 + parry * 0.35;
         ctx.strokeStyle = "#ffff66";
@@ -4249,7 +4765,7 @@
     }
 
     function drawOverlay() {
-      if (state === STATE_INTRO || state === STATE_OPENING || state === STATE_EPILOGUE || state === STATE_ENDING || state === STATE_BAD_ENDING || state === STATE_EXITED) return;
+      if (state === STATE_INTRO || state === STATE_OPENING || state === STATE_BOSS_DISCOVERY || state === STATE_EPILOGUE || state === STATE_ENDING || state === STATE_BAD_ENDING || state === STATE_EXITED) return;
       ctx.save();
       const cx = 36, cy = 36;
       ctx.strokeStyle = "#fff";
@@ -4271,6 +4787,18 @@
       ctx.font = "12px Consolas, monospace";
       ctx.fillText(state, W - 16, 24);
       ctx.fillText(`HP ${player.hp}/10`, W - 16, 42);
+      if (devInvincible) {
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#66ffff";
+        ctx.shadowColor = "#66ffff";
+        ctx.shadowBlur = 12;
+        ctx.font = "700 12px Consolas, monospace";
+        ctx.fillText("DEV INVINCIBLE", W / 2, H - 62);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#fff";
+      }
+      drawPlayerHealthBar();
+      drawSwordEnergyHud();
       if (boss) drawBossHealthBar();
       if (state === STATE_GAME_3D_BYPASS && room) {
         ctx.textAlign = "center";
@@ -4305,6 +4833,9 @@
         }
       }
       drawScreenFx();
+      if ((player.stun3D || 0) > 0 && is3DPointerState()) {
+        drawChainBindWarning();
+      }
       if (hasParryOpportunity()) {
         const a = 0.35 + Math.sin(gameTime * 18) * 0.14;
         drawParryFrame("#ff8a2a", a, 1);
@@ -4336,6 +4867,90 @@
         ctx.strokeStyle = "#ff2020";
         ctx.lineWidth = 18;
         ctx.strokeRect(8, 8, W - 16, H - 16);
+      }
+      ctx.restore();
+    }
+
+    function drawPlayerHealthBar() {
+      const bw = Math.min(360, W * 0.38);
+      const bh = 16;
+      const bx = W / 2 - bw / 2;
+      const by = H - 44;
+      const hpRatio = clamp(player.hp / player.maxHp, 0, 1);
+      const hpText = Number.isInteger(player.hp) ? `${player.hp}` : player.hp.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+      ctx.save();
+      ctx.globalAlpha = 0.94;
+      ctx.shadowColor = hpRatio <= 0.25 ? "#ff3030" : "#fff";
+      ctx.shadowBlur = hpRatio <= 0.25 ? 18 : 10;
+      ctx.fillStyle = "rgba(0,0,0,0.72)";
+      ctx.strokeStyle = hpRatio <= 0.25 ? "#ff3030" : "rgba(255,255,255,0.9)";
+      ctx.lineWidth = 2;
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.fillStyle = hpRatio <= 0.25 ? "#ff3030" : "#ffffff";
+      ctx.fillRect(bx + 3, by + 3, Math.max(0, (bw - 6) * hpRatio), bh - 6);
+      ctx.shadowBlur = 0;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.font = "700 12px Consolas, monospace";
+      ctx.fillStyle = hpRatio <= 0.25 ? "#ff8080" : "#ffffff";
+      ctx.fillText(`HP ${hpText}/${player.maxHp}`, W / 2, by - 5);
+      ctx.restore();
+    }
+
+    function drawSwordEnergyHud() {
+      if (!player.bossPrototype || !isBossState()) return;
+      const charges = player.swordEnergy || 0;
+      const progress = clamp((player.chargedSlashHold || 0) / 1.5, 0, 1);
+      const x = W / 2;
+      const y = H - 82;
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.font = "700 12px Consolas, monospace";
+      ctx.fillStyle = charges > 0 ? "#66ffff" : "rgba(255,255,255,0.52)";
+      ctx.shadowColor = charges > 0 ? "#66ffff" : "#fff";
+      ctx.shadowBlur = charges > 0 ? 12 : 4;
+      ctx.fillText(`SWORD ENERGY ${charges}/3  |  PARRY ${player.parryChargeCount || 0}/3`, x, y);
+      if (charges > 0) {
+        const bw = 220;
+        const bh = 8;
+        ctx.fillStyle = "rgba(0,0,0,0.78)";
+        ctx.strokeStyle = "#66ffff";
+        ctx.fillRect(x - bw / 2, y + 10, bw, bh);
+        ctx.strokeRect(x - bw / 2, y + 10, bw, bh);
+        ctx.fillStyle = progress >= 1 ? "#ffff66" : "#66ffff";
+        ctx.fillRect(x - bw / 2 + 2, y + 12, Math.max(0, (bw - 4) * progress), bh - 4);
+      }
+      ctx.restore();
+    }
+
+    function drawChainBindWarning() {
+      const t = clamp(player.stun3D || 0, 0, 1);
+      const pulse = 0.72 + Math.sin(gameTime * 18) * 0.18;
+      const bw = 300;
+      const bh = 58;
+      const bx = W / 2 - bw / 2;
+      const by = H * 0.28;
+      ctx.save();
+      ctx.globalAlpha = clamp(0.65 + t * 0.35, 0, 1);
+      ctx.fillStyle = "rgba(0,0,0,0.68)";
+      ctx.strokeStyle = "#ff3030";
+      ctx.shadowColor = "#ff3030";
+      ctx.shadowBlur = 18 * pulse;
+      ctx.lineWidth = 2;
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#ff6666";
+      ctx.font = "700 18px Consolas, monospace";
+      ctx.fillText(lang === "ko" ? "속박됨" : "CHAIN BOUND", W / 2, by + 25);
+      ctx.font = "700 12px Consolas, monospace";
+      ctx.fillStyle = "#fff";
+      ctx.fillText(`${(player.stun3D || 0).toFixed(1)}s`, W / 2, by + 44);
+      for (let i = 0; i < 5; i++) {
+        const yy = by + 9 + i * 10;
+        line(bx - 44, yy, bx + 34, yy + Math.sin(gameTime * 12 + i) * 8, "#ff3030", 2);
+        line(bx + bw - 34, yy + Math.sin(gameTime * 11 + i) * 8, bx + bw + 44, yy, "#ff3030", 2);
       }
       ctx.restore();
     }
@@ -4488,4 +5103,3 @@
   </script>
 </body>
 </html>
-
